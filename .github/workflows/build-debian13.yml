@@ -69,14 +69,10 @@ jobs:
       distro: debian-desktop
       script: sheng-rootfs_build.sh
 
-      kernel_version: ${{ inputs.kernel_version }}
-      kernel_version_default: '7.1'
+      kernel_version_default: ${{ inputs.kernel_version || '7.1' }}
 
-      kernel_channel: ${{ inputs.kernel_channel }}
-      kernel_channel_default: 'mainline'
-
-      desktop_env: ${{ inputs.desktop_env }}
-      boot_mode: ${{ inputs.boot_mode }}
+      desktop_env: ${{ inputs.desktop_env || 'all' }}
+      boot_mode: ${{ inputs.boot_mode || 'all' }}
 
       desktop_matrix: '["all"]'
       boot_matrix: '["all"]'
@@ -84,6 +80,6 @@ jobs:
       release_tag_prefix: debian13
       release_body_title: 'Debian 13 (Trixie) Desktop'
 
-      skip_release: ${{ inputs.skip_release }}
+      skip_release: ${{ inputs.skip_release || false }}
 
     secrets: inherit
