@@ -7,68 +7,83 @@ on:
         description: 'Distro identifier passed to script'
         required: true
         type: string
+
       script:
         description: 'Rootfs build script to run'
         required: true
         type: string
+
       kernel_version_default:
         description: 'Default kernel version'
         required: true
         type: string
+
       desktop_env:
         description: 'Desktop environment from user input (overrides matrix default)'
         required: false
         type: string
         default: ''
+
       boot_mode:
         description: 'Boot mode from user input (overrides matrix default)'
         required: false
         type: string
         default: ''
+
       desktop_matrix:
         description: 'Desktop environment matrix (JSON array)'
         required: false
         type: string
         default: '["all"]'
+
       boot_matrix:
         description: 'Boot mode matrix (JSON array)'
         required: false
         type: string
         default: '["all"]'
+
       release_tag_prefix:
         description: 'Prefix for release tag'
         required: true
         type: string
+
       release_body_title:
         description: 'Title for release body'
         required: false
         type: string
         default: ''
+
       skip_release:
         description: 'Skip creating GitHub Release'
         required: false
         type: boolean
         default: false
 
+    secrets: {}
+
 jobs:
   build:
     runs-on: ubuntu-24.04-arm
+
     strategy:
       fail-fast: false
       matrix:
         desktop: ${{ fromJSON(inputs.desktop_matrix) }}
         boot: ${{ fromJSON(inputs.boot_matrix) }}
+
     outputs:
       release_tag: ${{ steps.tag.outputs.release_tag }}
       build_success: ${{ steps.build.outcome }}
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Generate release tag
         id: tag
         run: |
           TAG="${{ inputs.release_tag_prefix }}-$(date -u '+%Y%m%d')-${GITHUB_SHA::8}"
-          echo "release_tag=$TAG" >> $GITHUB_OUTPUT
+          echo "release_tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Cache apt packages
         uses: actions/cache@v4
@@ -82,28 +97,44 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt update
-          sudo apt install -y debootstrap libarchive-tools p7zip-full curl wget android-sdk-libsparse-utils
+          sudo apt install -y \
+            debootstrap \
+            libarchive-tools \
+            p7zip-full \
+            curl \
+            wget \
+            android-sdk-libsparse-utils
 
       - name: Download kernel bundle
         run: |
           KERNEL_VER="${{ inputs.kernel_version_default }}"
+
           echo "Downloading kernel bundle version=${KERNEL_VER}"
 
           BUNDLE_TAG="kernel-bundle-latest"
+
           if ! gh release view "$BUNDLE_TAG" \
               --repo "${{ github.repository }}" > /dev/null 2>&1; then
+
             BUNDLE_TAG="kernel-bundle-${KERNEL_VER}"
+
             if ! gh release view "$BUNDLE_TAG" \
                 --repo "${{ github.repository }}" > /dev/null 2>&1; then
+
               echo "错误: 内核 Bundle 发布不存在！" >&2
-              echo "尝试过的 tags: $BUNDLE_TAG" >&2
+              echo "尝试过的 tag: kernel-bundle-latest 和 kernel-bundle-${KERNEL_VER}" >&2
               echo "请先通过 'Build Kernel' + 'Build Kernel Bundle' workflow 构建内核。" >&2
               exit 1
             fi
           fi
 
+          echo "Using kernel bundle: $BUNDLE_TAG"
+
           gh release download "$BUNDLE_TAG" \
-            --pattern "*.deb" --repo "${{ github.repository }}" --clobber
+            --pattern "*.deb" \
+            --repo "${{ github.repository }}" \
+            --clobber
+
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -113,26 +144,42 @@ jobs:
           KERNEL_VER="${{ inputs.kernel_version_default }}"
           BOOT_MODE="${{ inputs.boot_mode || 'all' }}"
           DESKTOP_ENV="${{ inputs.desktop_env || 'all' }}"
-          chmod +x ${{ inputs.script }}
-          sudo bash ${{ inputs.script }} ${{ inputs.distro }} "$KERNEL_VER" \
-            "$BOOT_MODE" "$DESKTOP_ENV"
-          echo "pkg_count=$(ls -1 *.7z 2>/dev/null | wc -l)" >> $GITHUB_OUTPUT
+
+          echo "Distro: ${{ inputs.distro }}"
+          echo "Kernel: $KERNEL_VER"
+          echo "Boot mode: $BOOT_MODE"
+          echo "Desktop environment: $DESKTOP_ENV"
+
+          chmod +x "${{ inputs.script }}"
+
+          sudo bash "${{ inputs.script }}" \
+            "${{ inputs.distro }}" \
+            "$KERNEL_VER" \
+            "$BOOT_MODE" \
+            "$DESKTOP_ENV"
+
+          echo "pkg_count=$(find . -maxdepth 1 -type f -name '*.7z' | wc -l)" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.release_tag_prefix }}-${{ matrix.desktop }}-${{ matrix.boot }}
-          path: "*.7z"
+          path: '*.7z'
           retention-days: 7
           if-no-files-found: error
 
   create-release:
-    name: "创建 Release"
+    name: 创建 Release
     runs-on: ubuntu-24.04-arm
-    needs: [build]
+
+    needs:
+      - build
+
     permissions:
       contents: write
+
     if: ${{ !inputs.skip_release && needs.build.result == 'success' }}
+
     steps:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -146,11 +193,14 @@ jobs:
             |------|------|
             | 发行版 | ${{ inputs.release_tag_prefix }} |
             | 内核版本 | ${{ inputs.kernel_version_default }} |
-            | 构建SHA | [${{ github.sha }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }}) |
+            | 构建 SHA | [${{ github.sha }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }}) |
             | 桌面环境 | ${{ inputs.desktop_matrix }} |
             | 启动模式 | ${{ inputs.boot_matrix }} |
+
+            ## Built artifacts
           draft: true
           prerelease: false
+
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -164,7 +214,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.build.outputs.release_tag }}
-          files: "*.7z"
+          files: '*.7z'
+
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -172,8 +223,9 @@ jobs:
         run: |
           TAG="${{ needs.build.outputs.release_tag }}"
 
-          # Build asset list
-          ASSETS=$(gh release view "$TAG" --json assets --jq '.assets[].name' 2>/dev/null || echo "")
+          ASSETS=$(gh release view "$TAG" \
+            --json assets \
+            --jq '.assets[].name' 2>/dev/null || echo "")
 
           echo "" > /tmp/release_body.md
           echo "### Built artifacts" >> /tmp/release_body.md
@@ -182,13 +234,19 @@ jobs:
           if [ -n "$ASSETS" ]; then
             while IFS= read -r asset; do
               if [ -n "$asset" ]; then
-                SIZE=$(gh release view "$TAG" --json assets --jq ".assets[] | select(.name==\"$asset\") | .sizeBytes" 2>/dev/null || echo "?")
+
+                SIZE=$(gh release view "$TAG" \
+                  --json assets \
+                  --jq ".assets[] | select(.name==\"$asset\") | .sizeBytes" \
+                  2>/dev/null || echo "?")
+
                 if [ "$SIZE" != "?" ] && [ "$SIZE" -gt 0 ] 2>/dev/null; then
                   HUMAN_SIZE=$((SIZE / 1024 / 1024))
                   echo "- \`$asset\` (~${HUMAN_SIZE}MB)" >> /tmp/release_body.md
                 else
                   echo "- \`$asset\`" >> /tmp/release_body.md
                 fi
+
               fi
             done <<< "$ASSETS"
           fi
@@ -197,16 +255,25 @@ jobs:
           echo "---" >> /tmp/release_body.md
           echo "**Built at**: $(date -u '+%Y-%m-%d %H:%M UTC')" >> /tmp/release_body.md
 
-          # Append to existing body — fetch and prepend
-          EXISTING_BODY=$(gh release view "$TAG" --json body --jq '.body' 2>/dev/null || echo "")
+          EXISTING_BODY=$(gh release view "$TAG" \
+            --json body \
+            --jq '.body' \
+            2>/dev/null || echo "")
+
           if [ -n "$EXISTING_BODY" ]; then
-            printf '%s\n\n%s' "$EXISTING_BODY" "$(cat /tmp/release_body.md)" > /tmp/combined_body.md
-            gh release edit "$TAG" --body-file /tmp/combined_body.md
+            printf '%s\n\n%s' \
+              "$EXISTING_BODY" \
+              "$(cat /tmp/release_body.md)" \
+              > /tmp/combined_body.md
+
+            gh release edit "$TAG" \
+              --body-file /tmp/combined_body.md
           else
-            gh release edit "$TAG" --body-file /tmp/release_body.md
+            gh release edit "$TAG" \
+              --body-file /tmp/release_body.md
           fi
 
-          # Publish the draft
           gh release edit "$TAG" --draft=false
+
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
